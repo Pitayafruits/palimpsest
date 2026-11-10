@@ -35,6 +35,8 @@ public class SyncWindow : Form {
     readonly TextBox page = new TextBox(), file = new TextBox(), user = new TextBox(), password = new TextBox();
     readonly ComboBox direction = new AppleCombo();
     readonly Button browse = new AppleButton(), start = new AppleButton(), stop = new AppleButton();
+    readonly Button review = new AppleButton();
+    bool reviewing;
     readonly Label status = new Label();
     readonly LinkLabel openDocument = new LinkLabel();
     readonly Button login = new AppleButton();
@@ -92,6 +94,7 @@ public class SyncWindow : Form {
         logout.LinkBehavior = LinkBehavior.HoverUnderline; logout.LinkClicked += Logout; Controls.Add(logout);
         AddButton(start, "开始同步", 24, 300, 190, Begin); ((AppleButton)start).Primary = true;
         AddButton(stop, "停止同步", 226, 300, 130, delegate { RequestStop(); status.Text = "正在停止…"; });
+        AddButton(review, "继续确认文档", 370, 300, 170, delegate { OpenReview(); }); review.Visible = false;
         status.SetBounds(28, 356, 844, 44); status.ForeColor = Color.FromArgb(110,110,115); Controls.Add(status);
         page.TextChanged += PageChanged;
         file.TextChanged += delegate { UpdateBaseline(); };
@@ -103,7 +106,10 @@ public class SyncWindow : Form {
         direction.SelectedIndexChanged += delegate { AutoSave(); };
         user.Leave += delegate { AutoSave(); };
         timer.Interval = 1000; timer.Tick += RefreshStatus; timer.Start();
-        FormClosing += delegate { windowClosing = true; RequestStop(); timer.Stop(); };
+        FormClosing += delegate(object sender, FormClosingEventArgs args) {
+            if(reviewing) { args.Cancel = true; status.Text = "请先在文档审阅窗口完成确认，或选择稍后处理。"; return; }
+            windowClosing = true; RequestStop(); timer.Stop();
+        };
         Directory.CreateDirectory(root);
         LoadCatalogue();
         RestoreLogin();
@@ -272,6 +278,8 @@ public class SyncWindow : Form {
             string id = Identity(ParsePage(page.Text), file.Text.Trim());
             bool exists = catalogueReady && catalogue.bindings.Any(b => b.id == id) && File.Exists(Path.Combine(BindingDir(id), "state.json"));
             direction.Enabled = !exists && (worker == null || worker.HasExited);
+            string pendingPath = Path.Combine(BindingDir(id),"conflict.json");
+            review.Visible = !reviewing && File.Exists(pendingPath) && Convert.ToString(json.Deserialize<Dictionary<string,object>>(File.ReadAllText(pendingPath,Encoding.UTF8))["phase"]) != "resolved";
         } catch { direction.Enabled = worker == null || worker.HasExited; }
     }
     void SetRunning(bool running) {
@@ -288,23 +296,62 @@ public class SyncWindow : Form {
         if(worker == null) return;
         try {
             string statusPath = Path.Combine(activeDir, "status.json");
-            if(File.Exists(statusPath)) {
+            bool needsReview = false;
+            if(!reviewing && File.Exists(statusPath)) {
                 var data = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(statusPath, Encoding.UTF8));
                 status.Text = "页面 " + ParsePage(page.Text) + "  ·  " + data["time"] + "\n" + data["message"];
                 if(data.ContainsKey("error_code") && Convert.ToString(data["error_code"]) == "auth_expired") {
                     try { credentialStore.Delete(); } catch(Exception) { status.Text = "登录已失效，清理本地登录记录失败，请手动退出登录。"; }
                     logoutPending = true;
                 }
+                needsReview = data.ContainsKey("error_code") && Convert.ToString(data["error_code"]) == "conflict";
             }
             if(worker.HasExited) {
+                int exitCode = worker.ExitCode;
+                bool wasReviewing = reviewing; reviewing = false;
                 SetRunning(false);
                 if(worker.ExitCode != 0) status.Text = "同步进程异常退出，请查看对应关联目录内的 worker-error.log。";
                 worker.Dispose(); worker = null;
                 if(logoutPending) { CompleteLogout(); status.Text = "已退出登录，请重新登录。"; }
+                else if(wasReviewing) {
+                    if(exitCode != 0) { review.Visible = true; status.Text = "审阅窗口未能正常打开，请查看日志后重试。"; }
+                    else if(PendingReview()) { review.Visible = true; status.Text = "有内容待确认 · 点击继续确认文档，同步已暂停。"; }
+                    else { review.Visible = false; Begin(this,EventArgs.Empty); }
+                }
+                else if(needsReview && session != null && !windowClosing) { OpenReview(); }
             }
         } catch(IOException) { } catch(ArgumentException) { }
     }
     void ShowError(Exception error) { status.Text = error.Message; }
+    bool PendingReview() {
+        if(activeDir == null) return false;
+        string path = Path.Combine(activeDir,"conflict.json");
+        if(!File.Exists(path)) return false;
+        var data = json.Deserialize<Dictionary<string,object>>(File.ReadAllText(path,Encoding.UTF8));
+        return Convert.ToString(data["phase"]) != "resolved";
+    }
+    void OpenReview() {
+        if(session == null || (worker != null && !worker.HasExited)) return;
+        try {
+            var binding = SaveBinding(); activeDir = BindingDir(binding.id);
+            var info = new ProcessStartInfo {
+                FileName=Path.Combine(appRoot,"engine","SyncCore.exe"),
+                Arguments="--review --config \"" + Path.Combine(activeDir,"mapping.json") + "\"",
+                WorkingDirectory=root, UseShellExecute=false, CreateNoWindow=true,
+                RedirectStandardInput=true, RedirectStandardError=true
+            };
+            info.EnvironmentVariables["PALIMPSEST_DATA"]=root;
+            worker=new Process(); worker.StartInfo=info;
+            worker.ErrorDataReceived += delegate(object obj, DataReceivedEventArgs args) {
+                if(args.Data != null) File.AppendAllText(Path.Combine(activeDir,"worker-error.log"),args.Data+Environment.NewLine);
+            };
+            worker.Start();worker.BeginErrorReadLine();
+            using(var writer=new StreamWriter(worker.StandardInput.BaseStream,new UTF8Encoding(false)))
+                writer.WriteLine(json.Serialize(new {username=session.username,password=session.password}));
+            reviewing=true;review.Visible=false;SetRunning(true);stop.Enabled=false;logout.Enabled=false;
+            status.Text="请在文档审阅窗口确认内容；你的选择会自动保留。";
+        } catch(Exception error) { reviewing=false;ShowError(error); }
+    }
     void ApplyLoginUI() {
         bool signedIn = session != null;
         user.Parent.Visible = password.Parent.Visible = passwordCaption.Visible = login.Visible = !signedIn;
@@ -372,6 +419,7 @@ public class SyncWindow : Form {
         try {
             var binding = SaveBinding();
             activeDir = BindingDir(binding.id);
+            if(PendingReview()) { OpenReview(); return; }
             if(!File.Exists(Path.Combine(activeDir,"state.json"))) {
                 string effect = binding.initial_sync == "local" ? "本地 Markdown 将替换此网页的正文。" : "此网页的正文将替换本地 Markdown。";
                 if(MessageBox.Show(this, "页面：" + binding.page_id + "\n本地：" + binding.local_file + "\n\n" + effect + "\n覆盖前会保存原内容，页面标题不变。", "确认首次同步方向", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;

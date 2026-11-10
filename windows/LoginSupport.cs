@@ -28,7 +28,14 @@ public class CredentialStore {
     }
     public LoginCredentials Load() {
         if(!File.Exists(path)) return null;
-        byte[] clear = ProtectedData.Unprotect(File.ReadAllBytes(path),Entropy,DataProtectionScope.CurrentUser);
+        byte[] encrypted = File.ReadAllBytes(path);
+        byte[] clear;
+        try { clear = ProtectedData.Unprotect(encrypted,Entropy,DataProtectionScope.CurrentUser); }
+        catch(CryptographicException) {
+            // Upgrade an existing site-bound credential without exporting plaintext.
+            byte[] legacy = Encoding.UTF8.GetBytes("ConfluenceMarkdownSync|" + ServerSettings.Site + "|v1");
+            clear = ProtectedData.Unprotect(encrypted,legacy,DataProtectionScope.CurrentUser);
+        }
         try {
             var credentials = new JavaScriptSerializer().Deserialize<LoginCredentials>(Encoding.UTF8.GetString(clear));
             if(credentials == null || String.IsNullOrWhiteSpace(credentials.username) || String.IsNullOrEmpty(credentials.password))

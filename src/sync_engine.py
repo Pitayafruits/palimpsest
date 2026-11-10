@@ -14,6 +14,7 @@ import urllib.error
 from lxml import etree
 from image_sync import Images, AttachmentClient
 from markdown_it import MarkdownIt
+from review import ConflictPending, ReviewService
 
 ROOT = DATA_ROOT
 MARKDOWN = MarkdownIt('commonmark', {'html': True}).enable(['table', 'strikethrough'])
@@ -276,6 +277,8 @@ class Sync:
                       'base': self.config.get('base_url', ''),
                       'local_hash': digest(md), 'remote_hash': digest(page['body']['storage']['value']),
                       'version': page['version']['number'], 'updated': time.time(), 'image_sync': 1,
+                      'baseline_md': md,
+                      'baseline_images': self.images.local_signature(md) if local_images is None else local_images,
                       'local_images': self.images.local_signature(md) if local_images is None else local_images,
                       'remote_images': self.images.remote_signature(page) if remote_images is None else remote_images}
         save_json(self.state_file, self.state)
@@ -336,6 +339,13 @@ class Sync:
 
     def tick(self):
         self.images.begin()
+        review = ReviewService(self)
+        if review.recover():
+            self.report('两端已更新，自动同步已恢复。')
+            return
+        pending = review.load()
+        if pending and pending.get('phase') != 'resolved':
+            raise ConflictPending('两边都已修改，有内容待确认。请打开文档审阅，确认后恢复同步。')
         md = self.read()
         if self.config['settle_seconds'] > 0 and time.time() - self.file.stat().st_mtime < self.config['settle_seconds']:
             self.report('等待本地文件保存完成…')
@@ -362,12 +372,8 @@ class Sync:
         local_changed = digest(md) != self.state['local_hash'] or current_local_images != self.state.get('local_images', current_local_images)
         remote_changed = digest(remote) != self.state['remote_hash'] or current_remote_images != self.state.get('remote_images', current_remote_images)
         if local_changed and remote_changed:
-            folder = self.data / 'conflicts' / time.strftime('%Y%m%d-%H%M%S')
-            folder.mkdir(parents=True, exist_ok=True)
-            (folder / 'local.md').write_text(md, encoding='utf-8')
-            (folder / 'remote.md').write_text(storage_to_md(remote), encoding='utf-8')
-            (folder / 'remote.storage.xml').write_text(remote, encoding='utf-8')
-            raise RuntimeError('两边都已修改，已暂停同步；两份内容保存在 conflicts 文件夹。')
+            review.capture(md, page)
+            raise ConflictPending('两边都已修改，有内容待确认。请打开文档审阅，确认后恢复同步。')
         if local_changed:
             self.push(md, page)
         elif remote_changed:
@@ -416,6 +422,8 @@ def headless():
         report('同步已停止。', 'stopped')
     except AuthenticationExpired as error:
         report(str(error), 'stopped', 'auth_expired')
+    except ConflictPending as error:
+        report(str(error), 'review', 'conflict')
     except Exception as error:
         report(str(error), 'stopped')
     finally:
@@ -425,7 +433,13 @@ def headless():
 
 
 if __name__ == '__main__':
-    if '--self-test' in sys.argv:
+    if '--review' in sys.argv:
+        from review_gui import standalone
+        raise SystemExit(standalone())
+    elif '--review-smoke-test' in sys.argv:
+        from review_gui import smoke_test
+        raise SystemExit(smoke_test())
+    elif '--self-test' in sys.argv:
         import ssl
         example = '# Portable test\n\n| A | B |\n| --- | --- |\n| 1 | **2** |\n'
         rendered = md_to_storage(example)

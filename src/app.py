@@ -20,6 +20,7 @@ def page_url(page):
 class Worker(QThread):
     message = Signal(str)
     auth_expired = Signal()
+    review_needed = Signal()
 
     def __init__(self, config_path, username, password):
         super().__init__()
@@ -46,6 +47,9 @@ class Worker(QThread):
             self.message.emit('同步已停止。')
         except engine.AuthenticationExpired:
             self.auth_expired.emit()
+        except engine.ConflictPending:
+            self.message.emit('两端都有修改，等待确认文档内容。')
+            self.review_needed.emit()
         except Exception as error:
             self.message.emit('同步已停止：' + str(error))
         finally:
@@ -82,6 +86,8 @@ class Window(QWidget):
         self.credentials = self.login_candidate = None
         self.after_login = False
         self.logout_notice = ''
+        self.pending_review = False
+        self.review_dialog = None
         self.store = credential_store
         self.setWindowTitle('Markdown ↔ Confluence')
         self.resize(780, 530)
@@ -165,6 +171,10 @@ class Window(QWidget):
         self.start = QPushButton('开始同步')
         self.start.setObjectName('primary')
         row.addWidget(self.stop)
+        self.review_button = QPushButton('继续确认文档')
+        self.review_button.setObjectName('link')
+        self.review_button.clicked.connect(self.open_review)
+        row.addWidget(self.review_button)
         row.addWidget(self.start)
         layout.addSpacing(10)
         layout.addLayout(row)
@@ -272,6 +282,15 @@ class Window(QWidget):
         for control in (self.page, self.file, self.browse, self.user, self.password, self.start, self.login_button):
             control.setEnabled(not busy)
         binding = self.current_binding()
+        pending = False
+        if binding:
+            path = self.catalogue.directory(binding) / 'conflict.json'
+            try:
+                pending = path.exists() and json.loads(path.read_text(encoding='utf-8')).get('phase') != 'resolved'
+            except (OSError, ValueError):
+                pending = True
+        self.review_button.setVisible(bool(pending))
+        self.review_button.setEnabled(not busy and self.credentials is not None)
         baseline = binding and (self.catalogue.directory(binding) / 'state.json').exists()
         self.direction.setEnabled(not busy and not baseline)
         self.stop.setEnabled(self.worker is not None and not self.pending_logout)
@@ -370,6 +389,10 @@ class Window(QWidget):
                 self.login(continue_sync=True)
                 return
             directory = self.catalogue.directory(binding)
+            pending = directory / 'conflict.json'
+            if pending.exists() and json.loads(pending.read_text(encoding='utf-8')).get('phase') != 'resolved':
+                self.open_review()
+                return
             if not (directory / 'state.json').exists():
                 effect = '本地 Markdown 将替换网页正文。' if binding['initial_sync'] == 'local' else '网页正文将替换本地 Markdown。'
                 answer = QMessageBox.question(self, '确认首次同步方向',
@@ -382,6 +405,7 @@ class Window(QWidget):
             self.worker = Worker(directory / 'mapping.json', *self.credentials)
             self.worker.message.connect(self.tell)
             self.worker.auth_expired.connect(self.authentication_expired)
+            self.worker.review_needed.connect(self.review_requested)
             self.worker.finished.connect(self.finished)
             self.update_controls()
             self.worker.start()
@@ -402,6 +426,31 @@ class Window(QWidget):
         self.update_controls()
         if self.closing:
             QTimer.singleShot(0, self.close)
+        elif self.pending_review and not self.pending_logout and self.credentials:
+            self.pending_review = False
+            QTimer.singleShot(0, self.open_review)
+
+    def review_requested(self):
+        self.pending_review = True
+
+    def open_review(self):
+        if self.worker or self.login_worker or self.review_dialog or not self.credentials:
+            return
+        binding = self.current_binding()
+        if not binding:
+            return
+        from review_gui import ReviewDialog
+        self.review_dialog = ReviewDialog(self.catalogue.directory(binding) / 'mapping.json', self.credentials, self)
+        self.review_dialog.exec()
+        resolved = self.review_dialog.succeeded
+        self.review_dialog.deleteLater()
+        self.review_dialog = None
+        self.update_controls()
+        if resolved:
+            self.tell('两端已更新，自动同步已恢复。')
+            self.begin()
+        else:
+            self.tell('有内容待确认 · 点击“继续确认文档”接着处理，同步已暂停。')
 
     def closeEvent(self, event):
         if self.worker or self.login_worker:

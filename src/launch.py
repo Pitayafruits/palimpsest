@@ -7,6 +7,9 @@ from server import configured_site, configure_site
 def main():
     application = QApplication.instance() or QApplication(sys.argv)
     application.setApplicationName('Palimpsest')
+    if '--review-smoke-test' in sys.argv:
+        from review_gui import smoke_test
+        return smoke_test()
     while True:
         try:
             if configured_site():

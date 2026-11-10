@@ -23,7 +23,7 @@ def freeze(entry, name, *extra):
 
 def main():
     if sys.platform == 'win32':
-        freeze('src/sync_engine.py', 'SyncCore', '--exclude-module', 'PySide6')
+        freeze('src/sync_engine.py', 'SyncCore', '--hidden-import', 'review_gui')
         package = DIST / 'Palimpsest'
         package.mkdir(exist_ok=True)
         shutil.copytree(DIST / 'SyncCore', package / 'engine', dirs_exist_ok=True)
@@ -34,6 +34,8 @@ def main():
             '/r:System.Web.Extensions.dll', '/r:System.Security.dll',
             ROOT / 'windows/SyncWindow.cs', ROOT / 'windows/LoginSupport.cs', ROOT / 'windows/ServerSettings.cs')
         run(package / 'engine/SyncCore.exe', '--self-test')
+        os.environ['QT_QPA_PLATFORM']='offscreen'
+        run(package / 'engine/SyncCore.exe', '--review-smoke-test')
         label = 'windows-x64'
     elif sys.platform == 'darwin':
         freeze('src/launch.py', 'Palimpsest', '--windowed',
@@ -41,6 +43,8 @@ def main():
                '--hidden-import', 'app', '--hidden-import', 'associations',
                '--hidden-import', 'login', '--hidden-import', 'sync_engine')
         package = DIST / 'Palimpsest.app'
+        os.environ['QT_QPA_PLATFORM']='offscreen'
+        run(package / 'Contents/MacOS/Palimpsest', '--review-smoke-test')
         label = 'macos-' + ('arm64' if platform.machine() == 'arm64' else 'x64')
     else:
         raise SystemExit('Build on Windows or macOS.')
