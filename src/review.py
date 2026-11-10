@@ -225,6 +225,7 @@ class ReviewService:
             blocks=blocks,decisions={},backup=str(directory),has_baseline=base is not None,phase='pending')
         known={x['id']:x for x in blocks}
         session['decisions']={k:v for k,v in previous.get('decisions',{}).items() if k in known}
+        session['edit_drafts']={k:v for k,v in previous.get('edit_drafts',{}).items() if k in known}
         save(self.path,session)
         return session
 
@@ -253,6 +254,7 @@ class ReviewService:
         current=self.load()
         if not current or current['snapshot']!=session['snapshot']: raise ReviewChanged('内容已更新，请重新查看。')
         block=next(x for x in session['blocks'] if x['id']==identity)
+        session.get('edit_drafts',{}).pop(identity,None)
         if source=='reset': session['decisions'].pop(identity,None)
         else:
             value=(block[source] if source in ('local','remote') else

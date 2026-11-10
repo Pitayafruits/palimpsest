@@ -1,4 +1,4 @@
-"""Document-first review workbench shared by Windows and macOS."""
+"""Focused, one-conflict-at-a-time review shared by Windows and macOS."""
 import difflib
 import html
 import json
@@ -7,48 +7,88 @@ import re
 import sys
 from urllib.parse import unquote
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QImage, QTextDocument, QTextCharFormat
+from PySide6.QtGui import QDesktopServices, QImage, QPainter, QColor, QPen
 from PySide6.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QFrame, QTextBrowser, QTextEdit, QListWidget,
-    QListWidgetItem, QSplitter, QMessageBox, QToolButton, QMenu, QDialogButtonBox)
+    QLabel, QPushButton, QScrollArea, QFrame, QTextBrowser, QTextEdit, QToolButton, QMenu, QProgressBar)
 from lxml import etree
-from review import ReviewService, ReviewChanged, apply_decisions
+from review import ReviewService, ReviewChanged
 
 STYLE='''
 QDialog { background:#f5f5f7; }
-QWidget { color:#25252a; font-family:"Microsoft YaHei UI","PingFang SC",sans-serif; font-size:14px; }
-QFrame#paper { background:white; border:1px solid #e5e5eb; border-radius:14px; }
+QWidget { color:#1d1d1f; font-family:"Microsoft YaHei UI","PingFang SC",sans-serif; font-size:14px; }
 QLabel#title { font-size:26px; font-weight:600; }
-QLabel#muted { color:#777780; font-size:12px; }
-QLabel#eyebrow { color:#927444; font-size:12px; }
-QLabel#section { font-size:16px; font-weight:600; }
-QPushButton { border:1px solid #dfdfe6; background:white; border-radius:8px; padding:9px 15px; }
-QPushButton:hover { background:#eeeef4; }
-QPushButton#primary { background:#007aff; color:white; border:0; }
-QPushButton#primary:hover { background:#0066da; }
-QPushButton#quiet { color:#007aff; border:0; background:transparent; }
-QPushButton:disabled { color:#a0a0a8; background:#ededf1; }
-QTextBrowser { border:0; background:transparent; padding:3px; }
-QTextEdit { border:1px solid #d9d9e1; border-radius:9px; background:white; padding:14px; }
-QListWidget { border:0; background:transparent; outline:0; }
-QListWidget::item { padding:12px 8px; border-radius:8px; margin:2px; }
-QListWidget::item:selected { background:#e7effc; color:#0064d2; }
-QScrollArea { border:0; background:transparent; }
-QWidget#reviewBody { background:transparent; }
-QSplitter::handle { background:transparent; width:14px; }
-QToolButton { border:0; color:#777780; padding:8px; }
+QLabel#muted { color:#86868b; font-size:12px; }
+QLabel#counter { color:#6e6e73; background:#eaeaec; border-radius:12px; padding:4px 12px; font-size:12px; }
+QLabel#location { color:#515155; font-size:14px; }
+QLabel#source { color:#3a3a3c; font-size:14px; font-weight:600; }
+QLabel#notice { color:#9c641b; background:#fff4df; border-radius:8px; padding:10px; margin-bottom:12px; }
+QFrame#option { background:white; border:1px solid #e5e5ea; border-radius:18px; }
+QFrame#option[selected="true"] { border:1px solid #007aff; background:#fbfdff; }
+QPushButton { border:1px solid #dedee3; background:white; border-radius:10px; padding:9px 20px; }
+QPushButton:hover { background:#f1f1f5; }
+QPushButton#primary { background:#007aff; color:white; border:1px solid #007aff; }
+QPushButton#primary:hover { background:#0068df; }
+QPushButton#selectedChoice { background:#eaf3ff; color:#0071e3; border:1px solid #eaf3ff; }
+QPushButton#choice { background:#f2f2f7; border:1px solid #f2f2f7; }
+QPushButton#choice:hover { background:#e9e9ef; }
+QPushButton#quiet { color:#007aff; background:transparent; border:0; padding:5px 10px; font-size:13px; }
+QPushButton#textButton { color:#6e6e73; background:transparent; border:0; padding-left:0; }
+QPushButton:disabled { color:#a1a1a8; background:#eeeef1; border-color:#eeeef1; }
+QPushButton#primary:disabled { color:#a1a1a8; background:#eeeef1; border:1px solid #eeeef1; }
+QTextBrowser { border:0; background:transparent; padding:0; }
+QTextEdit { background:white; border:0; padding:8px; }
+QProgressBar { border:0; background:#eaeaec; border-radius:1px; }
+QProgressBar::chunk { background:#007aff; border-radius:1px; }
+QToolButton { color:#007aff; background:transparent; border:0; padding:4px; font-size:12px; }
+QScrollBar:vertical { background:transparent; width:7px; margin:0; }
+QScrollBar::handle:vertical { background:#c7c7cc; min-height:30px; border-radius:3px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }
+QMenu { background:white; padding:5px; border:1px solid #e1e1e6; }
+QMenu::item { padding:9px 18px; }
+QMenu::item:selected { background:#eaf2ff; color:#007aff; }
 '''
 
 
-def tokens(text):
-    return re.findall(r'[\u4e00-\u9fff]|[A-Za-z0-9_]+|\s+|.',text,re.S)
 
-
-def changed_words(left,right):
-    a,b=tokens(left),tokens(right); la,rb=set(),set()
+def difference_spans(renderer,left,right):
+    def plain(markdown):
+        return ''.join(etree.HTML(renderer.render(markdown)).itertext())
+    a,b=plain(left),plain(right);la,rb=[],[]
     for tag,i,j,k,l in difflib.SequenceMatcher(None,a,b,autojunk=False).get_opcodes():
-        if tag!='equal': la.update(a[i:j]); rb.update(b[k:l])
-    return {x for x in la if x.strip()}, {x for x in rb if x.strip()}
+        if tag!='equal':
+            if i!=j:la.append((i,j))
+            if k!=l:rb.append((k,l))
+    return la,rb
+
+
+def highlight_html(rendered,ranges):
+    pieces=re.split(r'(<[^>]*>)',rendered);offset=0
+    for index in range(0,len(pieces),2):
+        text=html.unescape(pieces[index]);end=offset+len(text)
+        boundaries=sorted({offset,end}|{max(offset,min(end,x)) for pair in ranges for x in pair})
+        result=[]
+        for a,b in zip(boundaries,boundaries[1:]):
+            escaped=html.escape(text[a-offset:b-offset])
+            result.append('<span style="background-color:#fff2d6">'+escaped+'</span>'
+                          if any(start<=a<finish for start,finish in ranges) else escaped)
+        pieces[index]=''.join(result);offset=end
+    return ''.join(pieces)
+
+
+class SelectionMark(QWidget):
+    """A small vector indicator, independent of installed symbol fonts."""
+    def __init__(self,selected,parent=None):
+        super().__init__(parent);self.selected=selected;self.setFixedSize(22,22)
+
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor('#007aff' if self.selected else '#d9d9df'),1.3))
+        painter.setBrush(QColor('#007aff' if self.selected else '#ffffff'))
+        painter.drawEllipse(2,2,18,18)
+        if self.selected:
+            painter.setPen(QPen(QColor('white'),1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
+            painter.drawLine(7,11,10,14);painter.drawLine(10,14,15,8)
 
 
 class DocumentRenderer:
@@ -97,30 +137,26 @@ class DocumentRenderer:
                     if not re.match(r'^https?://',node.get('href','')): node.attrib.pop('href',None)
             rendered=''.join(etree.tostring(x,encoding='unicode',method='html') for x in root)
             if marks:
-                pieces=re.split(r'(<[^>]*>)',rendered)
-                for index in range(0,len(pieces),2):
-                    pieces[index]=''.join('<span style="background-color:#fff0c7">'+html.escape(t)+'</span>'
-                        if t in marks else html.escape(t) for t in tokens(html.unescape(pieces[index])))
-                rendered=''.join(pieces)
+                rendered=highlight_html(rendered,marks)
             return rendered
         except Exception:
             return '<pre>'+html.escape(text)+'</pre>'
 
 
 class Paper(QTextBrowser):
-    def __init__(self,renderer,text,marks=None):
-        super().__init__(); self.renderer=renderer
+    def __init__(self,renderer,text,marks=None,flow=True):
+        super().__init__(); self.renderer=renderer; self.flow=flow
         self.setOpenLinks(False);self.setOpenExternalLinks(False)
         self.anchorClicked.connect(self.open_link)
         self.setStyleSheet('QTextBrowser {border:0; background:transparent;}')
         self.document().setDefaultStyleSheet('''
             body {line-height:1.6;} p {margin:8px 0;} h1,h2,h3,h4 {margin-top:16px;}
-            table {border-collapse:collapse; width:100%;} td,th {border:1px solid #e0e0e7; padding:9px;}
-            th {background:#f5f5f8;} blockquote {color:#666674;} pre {background:#f3f3f6; padding:12px;}
+            table {border-collapse:collapse; width:100%;} td,th {border:1px solid #ececf1; padding:11px;}
+            th {background:#f6f7f9;} blockquote {color:#666674;} pre {background:#f3f3f6; padding:12px;}
         ''')
         self.setHtml(renderer.render(text,marks))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self.setSizeAdjustPolicy(QScrollArea.SizeAdjustPolicy.AdjustToContents if flow else QScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self.fit()
 
     def loadResource(self,kind,url):
@@ -140,6 +176,7 @@ class Paper(QTextBrowser):
 
     def fit(self):
         self.document().setTextWidth(max(220,self.viewport().width()))
+        if not self.flow:return
         height=int(self.document().size().height())+40
         self.setFixedHeight(max(50,min(900,height)))
 
@@ -172,41 +209,6 @@ class RichEditor(QTextEdit):
         return result
 
 
-class EditDialog(QDialog):
-    def __init__(self,parent,session,block):
-        super().__init__(parent);self.setWindowTitle('调整这一处内容');self.resize(840,580)
-        layout=QVBoxLayout(self);layout.setContentsMargins(24,24,24,24)
-        title=QLabel('把这一处写成你希望的样子');title.setObjectName('section');layout.addWidget(title)
-        toolbar=QHBoxLayout()
-        self.table_header=block.get('table_header','')
-        self.editor=RichEditor(session,self.table_header+session['decisions'].get(block['id'],{}).get('text',block['local']))
-        for caption,action in [('加粗',self.bold),('撤销',self.editor.undo),('重做',self.editor.redo)]:
-            button=QPushButton(caption);button.clicked.connect(action);toolbar.addWidget(button)
-        toolbar.addStretch();layout.addLayout(toolbar);layout.addWidget(self.editor)
-        note=QLabel('可直接编辑文字、列表与表格。保留的图片和网页组件会随最终文档同步。');note.setObjectName('muted');layout.addWidget(note)
-        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText('采用这段内容')
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
-        buttons.accepted.connect(self.check);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
-        self.text=None
-
-    def bold(self):
-        self.editor.setFontWeight(QFont.Weight.Normal if self.editor.fontWeight()>500 else QFont.Weight.Bold)
-
-    def check(self):
-        try:
-            self.text=self.editor.value()
-            if self.table_header:
-                rows=self.text.strip().splitlines(True)
-                if len(rows)<2 or not re.fullmatch(r'[| :\-\r\n]+',rows[1]):
-                    raise ValueError('请保留表格的列标题；可以调整下方内容。')
-                self.text=''.join(rows[2:])
-            from sync_engine import md_to_storage
-            if self.text.strip(): md_to_storage(self.text,raw_images=True)
-            self.accept()
-        except Exception as error: QMessageBox.warning(self,'请检查内容',str(error))
-
-
 class Operation(QThread):
     completed=Signal(object,object,str)
     def __init__(self,config,credentials,session=None):
@@ -235,189 +237,273 @@ class Operation(QThread):
 
 
 class ReviewDialog(QDialog):
+    """One decision at a time. Unchanged and auto-merged text never enters this view."""
     def __init__(self,config,credentials,parent=None,session=None,service=None):
-        super().__init__(parent);self.config=config;self.credentials=credentials;self.session=session;self.service=service
-        self.operation=None;self.succeeded=False;self.cards={};self.expanded=set();self.full_preview=False
-        self.setWindowTitle('Palimpsest · 确认文档更新');self.resize(1220,820);self.setMinimumSize(880,600);self.setStyleSheet(STYLE)
-        layout=QVBoxLayout(self);layout.setContentsMargins(28,25,28,20);layout.setSpacing(12)
-        top=QHBoxLayout();texts=QVBoxLayout()
-        self.title=QLabel('让两端重新保持一致');self.title.setObjectName('title');texts.addWidget(self.title)
-        self.summary=QLabel('正在检查本地与网页的最新内容…');self.summary.setObjectName('muted');self.summary.setWordWrap(True);texts.addWidget(self.summary)
-        top.addLayout(texts,1)
-        self.more=QToolButton();self.more.setText('更多 ···');self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu=QMenu(self)
-        menu.addAction('整篇采用本地写法',lambda:self.adopt_all('local'))
-        menu.addAction('整篇采用网页写法',lambda:self.adopt_all('remote'))
-        menu.addSeparator();menu.addAction('打开网页文档',self.open_web);menu.addAction('查看本次备份',self.open_backup)
-        self.more.setMenu(menu);top.addWidget(self.more);layout.addLayout(top)
-        self.notice=QLabel();self.notice.setWordWrap(True);self.notice.setStyleSheet('color:#936325; padding:8px; background:#fff6e5; border-radius:8px;');self.notice.hide();layout.addWidget(self.notice)
-        splitter=QSplitter();self.navigation=QListWidget();self.navigation.setMaximumWidth(220);self.navigation.setMinimumWidth(160)
-        self.navigation.itemClicked.connect(self.navigate);splitter.addWidget(self.navigation)
-        self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);splitter.addWidget(self.scroll);splitter.setStretchFactor(1,1);layout.addWidget(splitter,1)
-        footer=QHBoxLayout();self.progress=QLabel('');self.progress.setObjectName('muted');footer.addWidget(self.progress,1)
-        self.preview=QPushButton('查看完整文档');self.preview.setObjectName('quiet');self.preview.clicked.connect(self.toggle_preview);footer.addWidget(self.preview)
-        self.later=QPushButton('稍后处理');self.later.clicked.connect(self.reject);footer.addWidget(self.later)
-        self.confirm=QPushButton('确认并同步');self.confirm.setObjectName('primary');self.confirm.clicked.connect(self.submit);footer.addWidget(self.confirm);layout.addLayout(footer)
-        self.footnote=QLabel('更新前会自动备份两端。关闭此窗口会保留你的选择，同步继续暂停。');self.footnote.setObjectName('muted');layout.addWidget(self.footnote)
-        if session: self.rebuild()
-        else: QTimer.singleShot(0,self.prepare)
+        super().__init__(parent)
+        self.config,self.credentials=config,credentials
+        self.session,self.service=session,service
+        self.operation=None;self.succeeded=False;self.index=0;self.editing=False
+        self.edit_header='';self.editor=None;self.scrolling=False
+        self.setWindowTitle('确认文档内容')
+        self.resize(1040,600);self.setMinimumSize(820,520)
+        self.setStyleSheet(STYLE)
+        layout=QVBoxLayout(self);layout.setContentsMargins(36,30,36,24);layout.setSpacing(0)
 
-    def prepare(self): self.run_operation()
+        self.filename=QLabel('');self.filename.setObjectName('muted')
+        self.filename.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.filename);layout.addSpacing(9)
+        header=QHBoxLayout();header.setSpacing(18)
+        self.title=QLabel('选择要保留的内容');self.title.setObjectName('title')
+        header.addWidget(self.title,1)
+        self.counter=QLabel('');self.counter.setObjectName('counter');header.addWidget(self.counter)
+        layout.addLayout(header);layout.addSpacing(19)
+        self.progress_line=QProgressBar();self.progress_line.setTextVisible(False)
+        self.progress_line.setFixedHeight(2);layout.addWidget(self.progress_line)
+        layout.addSpacing(21)
+        self.location=QLabel('正在读取文档…');self.location.setObjectName('location')
+        self.location.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.location);layout.addSpacing(13)
+        self.notice=QLabel('');self.notice.setWordWrap(True);self.notice.setObjectName('notice');self.notice.hide()
+        layout.addWidget(self.notice)
+        self.body=QWidget();self.body_layout=QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(0,0,0,0);self.body_layout.setSpacing(12)
+        layout.addWidget(self.body,1);layout.addSpacing(12)
+        self.adjust=QPushButton('自己调整…');self.adjust.setObjectName('quiet')
+        self.adjust.clicked.connect(self.begin_edit)
+        adjust_row=QHBoxLayout();adjust_row.addStretch();adjust_row.addWidget(self.adjust);adjust_row.addStretch()
+        layout.addLayout(adjust_row);layout.addSpacing(21)
+        footer=QHBoxLayout();footer.setSpacing(10)
+        self.later=QPushButton('稍后处理');self.later.setObjectName('textButton')
+        self.later.clicked.connect(self.reject);footer.addWidget(self.later)
+        footer.addStretch()
+        self.previous=QPushButton('上一处');self.previous.clicked.connect(self.go_previous);footer.addWidget(self.previous)
+        self.confirm=QPushButton('下一处');self.confirm.setObjectName('primary')
+        self.confirm.setMinimumWidth(132);self.confirm.clicked.connect(self.advance);footer.addWidget(self.confirm)
+        layout.addLayout(footer)
+        if session:self.rebuild(initial=True)
+        else:QTimer.singleShot(0,self.prepare)
+
+    def conflicts(self):
+        return [block for block in self.session['blocks'] if block['kind']=='conflict'] if self.session else []
+
+    def outstanding(self):
+        return [block for block in self.conflicts() if block['id'] not in self.session['decisions']]
+
+    def current_block(self):
+        blocks=self.conflicts()
+        return blocks[self.index] if blocks else None
+
+    def prepare(self):self.run_operation()
 
     def run_operation(self,session=None):
-        if self.operation: return
+        if self.operation:return
         self.set_busy(True)
         self.operation=Operation(self.config,self.credentials,session)
         self.operation.completed.connect(self.completed)
         self.operation.finished.connect(self.operation_finished)
         self.operation.start()
 
-    def operation_finished(self):
-        old,self.operation=self.operation,None;old.deleteLater();self.set_busy(False)
-        if self.succeeded: self.accept()
-
     def completed(self,session,service,error):
         if session:
             self.session,self.service=session,service
             self.succeeded=session.get('phase')=='resolved'
-            self.rebuild()
-        if error:
-            self.notice.setText(error);self.notice.show()
-        if self.succeeded:
-            self.summary.setText('两端已更新，自动同步即将恢复。')
+            self.editing=False;self.rebuild(initial=True)
+        if error:self.notice.setText(error);self.notice.show()
+
+    def operation_finished(self):
+        old,self.operation=self.operation,None;old.deleteLater();self.set_busy(False)
+        if self.succeeded:self.accept()
 
     def set_busy(self,busy):
-        for control in (self.more,self.preview,self.confirm,self.later,self.scroll):control.setEnabled(not busy)
-        if busy:self.progress.setText('正在安全更新两端，请稍候…' if self.session else '正在读取文档…')
-        elif self.session:self.update_progress()
+        for control in (self.body,self.adjust,self.later,self.previous,self.confirm):
+            control.setEnabled(not busy)
+        if busy:self.confirm.setText('正在同步…' if self.session else '读取中…')
+        elif self.session:self.update_controls()
 
-    def outstanding(self):
-        return [b for b in self.session['blocks'] if b['kind']=='conflict' and b['id'] not in self.session['decisions']] if self.session else []
-
-    def update_progress(self):
-        count=len(self.outstanding())
-        self.progress.setText('还有 '+str(count)+' 处待确认' if count else '内容已确认 · 将更新本地与网页')
-        self.confirm.setText('查看下一处待确认' if count else '确认并同步')
-
-    def rebuild(self):
-        self.renderer=DocumentRenderer(self.session);self.cards={};self.navigation.clear()
-        old=self.scroll.takeWidget()
-        if old:old.deleteLater()
-        body=QWidget();body.setObjectName('reviewBody');stack=QVBoxLayout(body);stack.setContentsMargins(2,2,12,16);stack.setSpacing(15)
-        auto=sum(b['kind']=='auto' for b in self.session['blocks']);remaining=len(self.outstanding())
-        self.summary.setText(Path(self.session['file']).name+'\n'+
-            ('已合并 '+str(auto)+' 处互不影响的修改，'+str(remaining)+' 处需要你确认。' if self.session['has_baseline'] else
-             '这份文档来自旧版本，没有保留上次正文；为避免误合并，请确认不同的部分。'))
-        if self.full_preview:
-            text=''.join(self.session['decisions'].get(b['id'],{}).get('text',b['result'] if b['result'] is not None else b['local']) for b in self.session['blocks'])
-            heading=QLabel('最终文档预览'+(' · 尚有未确认内容，暂显示本地写法' if remaining else ''));heading.setObjectName('section');stack.addWidget(heading)
-            stack.addWidget(Paper(self.renderer,text))
+    def update_controls(self):
+        blocks=self.conflicts();block=self.current_block()
+        total=len(blocks)
+        chosen=sum(b['id'] in self.session['decisions'] for b in blocks)
+        self.counter.setText(str(self.index+1)+' / '+str(total) if total else '')
+        self.progress_line.setRange(0,max(total,1));self.progress_line.setValue(chosen if total else 1)
+        self.previous.setVisible(not self.editing and total>1)
+        self.previous.setEnabled(self.index>0 and not self.operation)
+        self.adjust.setVisible(bool(block))
+        self.adjust.setText('取消调整' if self.editing else '自己调整…')
+        if self.editing:
+            self.confirm.setText('保留这段内容');self.confirm.setEnabled(not self.operation)
         else:
-            for block in self.session['blocks']:
-                card=self.make_card(block);self.cards[block['id']]=card;stack.addWidget(card)
-                if block['kind']!='same':
-                    item=QListWidgetItem(('待确认 · ' if block in self.outstanding() else '已确认 · ' if block['id'] in self.session['decisions'] else '已合并 · ')+block['heading'])
-                    item.setData(Qt.ItemDataRole.UserRole,block['id']);self.navigation.addItem(item)
-        stack.addStretch();self.scroll.setWidget(body)
-        self.preview.setText('返回逐处确认' if self.full_preview else '查看完整文档');self.update_progress()
+            self.confirm.setText('下一处' if self.outstanding() else '同步两端')
+            self.confirm.setEnabled(not self.operation and (block is None or block['id'] in self.session['decisions']))
 
-    def make_card(self,block):
-        card=QFrame();card.setObjectName('paper');layout=QVBoxLayout(card);layout.setContentsMargins(20,17,20,18);layout.setSpacing(12)
-        if block['kind']=='same':
-            rows=block['local'].splitlines();button=QPushButton(('收起' if block['id'] in self.expanded else '展开')+'相同的 '+str(len(rows))+' 行内容')
-            button.setObjectName('quiet');button.clicked.connect(lambda checked=False,b=block:self.expand(b['id']));layout.addWidget(button)
-            if block['id'] in self.expanded:layout.addWidget(Paper(self.renderer,block['local']))
-            else:
-                headings=re.findall(r'(?m)^#{1,6}\s+(.+)$',block['local'])
-                if headings:
-                    label=QLabel(' · '.join(headings[-2:]));label.setObjectName('muted');layout.addWidget(label)
-            return card
+    def clear_body(self):
+        while self.body_layout.count():
+            item=self.body_layout.takeAt(0)
+            if item.widget():item.widget().deleteLater()
+        self.source_buttons={};self.source_papers={}
+
+    def rebuild(self,initial=False):
+        if not self.session:return
+        blocks=self.conflicts()
+        if initial:
+            self.index=next((i for i,b in enumerate(blocks) if b['id'] not in self.session['decisions']),max(0,len(blocks)-1))
+            if blocks and blocks[self.index]['id'] in self.session.get('edit_drafts',{}):self.editing=True
+        self.index=max(0,min(self.index,len(blocks)-1))
+        name=Path(self.session['file']).name
+        self.filename.setText(self.fontMetrics().elidedText(name,Qt.TextElideMode.ElideMiddle,max(500,self.width()-100)))
+        self.filename.setToolTip(name)
+        self.renderer=DocumentRenderer(self.session)
+        self.clear_body()
+        block=self.current_block()
+        if block is None:
+            self.title.setText('没有需要处理的冲突')
+            self.location.setText('两端的修改可以合并。')
+            self.body_layout.addStretch();self.update_controls();return
+        self.title.setText('选择要保留的内容')
+        heading=re.sub(r'^\d+(?:\.\d+)*[.)、]?\s*','',block['heading'])
+        first_row=(block['local'] or block['remote']).lstrip().splitlines()
+        row_name=''
+        if block.get('table_header') and first_row and first_row[0].startswith('|'):
+            row_name=first_row[0].split('|')[1].strip()
+        self.location.setText(heading+('  /  '+row_name if row_name and row_name!=heading else ''))
         decision=self.session['decisions'].get(block['id'])
-        head=QHBoxLayout();title=QLabel(block['heading']);title.setObjectName('section');head.addWidget(title,1)
-        badge=QLabel('需要确认' if block['kind']=='conflict' and not decision else '已确认' if decision else '已自动合并')
-        badge.setObjectName('eyebrow');head.addWidget(badge);layout.addLayout(head)
-        if block['kind']=='conflict' and not decision:
-            left_marks,right_marks=changed_words(block['local'],block['remote'])
-            columns=QHBoxLayout();columns.setSpacing(18)
-            for source,caption,marks in [('local','本地文档的写法',left_marks),('remote','网页文档的写法',right_marks)]:
-                column=QVBoxLayout();label=QLabel(caption);label.setObjectName('muted');column.addWidget(label)
-                column.addWidget(Paper(self.renderer,block['table_header']+block[source],marks))
-                button=QPushButton('采用'+('本地' if source=='local' else '网页')+'写法')
-                button.clicked.connect(lambda checked=False,b=block,s=source:self.choose(b,s));column.addWidget(button)
-                columns.addLayout(column,1)
-            layout.addLayout(columns)
-            actions=QHBoxLayout()
-            for caption,source in [('我来调整','custom'),('两段都保留','both'),('查看上次内容','base')]:
-                if source=='base' and not self.session['has_baseline']:continue
-                button=QPushButton(caption);button.setObjectName('quiet');button.clicked.connect(lambda checked=False,b=block,s=source:self.choose(b,s));actions.addWidget(button)
-            actions.addStretch();layout.addLayout(actions)
+        if self.editing:
+            self.show_editor(block)
+        elif decision and decision['source'] in ('custom','both'):
+            self.show_custom_result(block,decision)
         else:
-            layout.addWidget(Paper(self.renderer,block['table_header']+(decision['text'] if decision else block['result'])))
-            if decision:
-                row=QHBoxLayout();caption=QLabel({'local':'采用了本地写法','remote':'采用了网页写法','custom':'已按你的调整保留','both':'已保留两段内容'}.get(decision['source'],''));caption.setObjectName('muted');row.addWidget(caption,1)
-                button=QPushButton('重新选择');button.setObjectName('quiet');button.clicked.connect(lambda checked=False,b=block:self.choose(b,'reset'));row.addWidget(button);layout.addLayout(row)
-            else:
-                note=QLabel('两端修改互不影响，已保留在最终文档中。');note.setObjectName('muted');layout.addWidget(note)
-        return card
+            self.show_comparison(block,decision)
+        self.update_controls()
 
-    def choose(self,block,source):
+    def show_comparison(self,block,decision):
+        row=QWidget();columns=QHBoxLayout(row);columns.setContentsMargins(0,0,0,0);columns.setSpacing(16)
+        local_marks,remote_marks=difference_spans(self.renderer,block['table_header']+block['local'],block['table_header']+block['remote'])
+        for source,caption,marks in [('local','本地文件',local_marks),('remote','网页文档',remote_marks)]:
+            selected=bool(decision and decision['source']==source)
+            card=QFrame();card.setObjectName('option');card.setProperty('selected',selected)
+            content=QVBoxLayout(card);content.setContentsMargins(22,20,22,20);content.setSpacing(18)
+            header=QHBoxLayout()
+            label=QLabel(caption);label.setObjectName('source');header.addWidget(label,1)
+            header.addWidget(SelectionMark(selected));content.addLayout(header)
+            paper=Paper(self.renderer,block['table_header']+block[source],marks,flow=False)
+            paper.setMinimumHeight(120);content.addWidget(paper,1);self.source_papers[source]=paper
+            button=QPushButton(('已选' if selected else '保留')+('本地' if source=='local' else '网页'))
+            button.setObjectName('selectedChoice' if selected else 'choice')
+            button.clicked.connect(lambda checked=False,s=source:self.choose(self.current_block(),s))
+            button.setFixedWidth(150)
+            self.source_buttons[source]=button;content.addWidget(button,0,Qt.AlignmentFlag.AlignHCenter)
+            columns.addWidget(card,1)
+        self.body_layout.addWidget(row,1)
+        for side,other in [('local','remote'),('remote','local')]:
+            self.source_papers[side].verticalScrollBar().valueChanged.connect(
+                lambda value,s=side,o=other:self.sync_scroll(value,s,o))
+
+    def sync_scroll(self,value,source,other):
+        if self.scrolling or other not in self.source_papers:return
+        self.scrolling=True
+        left=self.source_papers[source].verticalScrollBar();right=self.source_papers[other].verticalScrollBar()
+        right.setValue(round(value*right.maximum()/max(1,left.maximum())))
+        self.scrolling=False
+
+    def show_custom_result(self,block,decision):
+        card=QFrame();card.setObjectName('option');card.setProperty('selected',True)
+        content=QVBoxLayout(card);content.setContentsMargins(22,18,22,18)
+        header=QHBoxLayout();caption=QLabel('保留调整后的内容');caption.setObjectName('source');header.addWidget(caption,1)
+        reset=QPushButton('重新对比');reset.setObjectName('quiet');reset.clicked.connect(lambda:self.choose(block,'reset'))
+        header.addWidget(reset);content.addLayout(header)
+        content.addWidget(Paper(self.renderer,block['table_header']+decision['text'],flow=False),1)
+        self.body_layout.addWidget(card,1)
+
+    def begin_edit(self):
+        if not self.current_block() or self.operation:return
+        self.editing=not self.editing;self.rebuild()
+
+    def show_editor(self,block):
+        card=QFrame();card.setObjectName('option')
+        content=QVBoxLayout(card);content.setContentsMargins(20,16,20,20);content.setSpacing(12)
+        toolbar=QHBoxLayout()
+        label=QLabel('编辑要保留的内容');label.setObjectName('source');toolbar.addWidget(label,1)
+        seed=QToolButton();seed.setText('起始内容');seed.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu=QMenu(seed)
+        for text,source in [('从本地开始','local'),('从网页开始','remote'),('合并两份内容','both')]:
+            menu.addAction(text,lambda checked=False,s=source:self.reseed_editor(s))
+        seed.setMenu(menu);toolbar.addWidget(seed);content.addLayout(toolbar)
+        self.edit_header=block.get('table_header','')
+        text=self.session['decisions'].get(block['id'],{}).get('text',block['local'])
+        self.editor=RichEditor(self.session,self.session.get('edit_drafts',{}).get(block['id'],self.edit_header+text))
+        content.addWidget(self.editor,1);self.body_layout.addWidget(card,1)
+        self.editor.setFocus()
+
+    def reseed_editor(self,source):
+        block=self.current_block()
+        text=block[source] if source in ('local','remote') else block['local'].rstrip()+('\n' if self.edit_header else '\n\n')+block['remote']
+        old=self.editor
+        self.editor=RichEditor(self.session,self.edit_header+text)
+        old.parentWidget().layout().replaceWidget(old,self.editor);old.deleteLater();self.editor.setFocus()
+
+    def save_editor(self):
+        from sync_engine import md_to_storage
+        text=self.editor.value()
+        if self.edit_header:
+            rows=text.strip().splitlines(True)
+            if len(rows)<2 or not re.fullmatch(r'[| :\-\r\n]+',rows[1]):
+                raise ValueError('请保留表格的列标题，修改下方内容即可。')
+            text=''.join(rows[2:])
+        if text.strip():md_to_storage(text,raw_images=True)
+        self.choose(self.current_block(),'custom',text)
+
+    def choose(self,block,source,text=None):
+        if not block or not self.service:return
         try:
-            if source=='base':
-                dialog=QDialog(self);dialog.setWindowTitle('上次同步时的内容');dialog.resize(750,480);layout=QVBoxLayout(dialog);layout.addWidget(Paper(self.renderer,block['table_header']+block['base']));dialog.exec();return
-            text=None
-            if source=='custom':
-                editor=EditDialog(self,self.session,block)
-                if editor.exec()!=QDialog.DialogCode.Accepted:return
-                text=editor.text
-            position=self.scroll.verticalScrollBar().value()
             self.service.save_decision(self.session,block['id'],source,text)
-            self.rebuild();QTimer.singleShot(0,lambda:self.scroll.verticalScrollBar().setValue(position))
-        except Exception as error:QMessageBox.warning(self,'未能保存选择',str(error))
+            self.editing=False;self.rebuild()
+        except Exception as error:
+            self.notice.setText(str(error));self.notice.show()
 
-    def expand(self,identity):
-        if identity in self.expanded:self.expanded.remove(identity)
-        else:self.expanded.add(identity)
-        position=self.scroll.verticalScrollBar().value();self.rebuild();QTimer.singleShot(0,lambda:self.scroll.verticalScrollBar().setValue(position))
+    def go_previous(self):
+        if self.index>0 and not self.operation:
+            self.editing=False;self.index-=1;self.rebuild()
 
-    def navigate(self,item):
-        identity=item.data(Qt.ItemDataRole.UserRole)
-        if self.full_preview:self.full_preview=False;self.rebuild()
-        if identity in self.cards:self.scroll.ensureWidgetVisible(self.cards[identity],0,24)
-
-    def toggle_preview(self):self.full_preview=not self.full_preview;self.rebuild()
-
-    def adopt_all(self,source):
-        if not self.session:return
-        answer=QMessageBox.question(self,'采用整篇文档？','这会放弃另一端独有的修改。更新前仍会保留两端备份。',QMessageBox.StandardButton.Ok|QMessageBox.StandardButton.Cancel,QMessageBox.StandardButton.Cancel)
-        if answer!=QMessageBox.StandardButton.Ok:return
-        # Whole-document adoption also replaces automatically merged ranges.
-        text=self.session[source]
-        self.session['blocks']=[dict(id='whole-'+source,kind='conflict',base='',local=self.session['local'],remote=self.session['remote'],result=None,source='',heading='整篇文档',table_header='')]
-        from review import save
-        save(self.service.path,self.session)
-        self.service.save_decision(self.session,'whole-'+source,source,text)
-        self.full_preview=True;self.rebuild()
-
-    def submit(self):
-        if not self.session:return
-        outstanding=self.outstanding()
-        if outstanding:
-            if self.full_preview:self.full_preview=False;self.rebuild()
-            self.scroll.ensureWidgetVisible(self.cards[outstanding[0]['id']],0,24);return
+    def advance(self):
+        if self.operation or not self.session:return
+        if self.editing:
+            try:self.save_editor()
+            except Exception as error:self.notice.setText(str(error));self.notice.show()
+            return
+        block=self.current_block()
+        if block and block['id'] not in self.session['decisions']:return
+        pending=self.outstanding()
+        if pending:
+            blocks=self.conflicts()
+            targets=[i for i,b in enumerate(blocks) if b['id'] not in self.session['decisions']]
+            self.index=next((i for i in targets if i>self.index),targets[0])
+            self.rebuild();return
         self.notice.hide();self.run_operation(self.session)
 
-    def open_web(self):
-        if self.session:QDesktopServices.openUrl(QUrl(self.session['base_url']+'/pages/viewpage.action?pageId='+self.session['page']))
-
-    def open_backup(self):
-        if self.session:QDesktopServices.openUrl(QUrl.fromLocalFile(self.session['backup']))
+    def submit(self):self.advance()
 
     def reject(self):
-        if not self.operation:self.credentials=None;super().reject()
+        if self.operation:return
+        if self.editing:
+            # An unfinished edit is a draft, not an accepted decision.
+            try:self.save_edit_draft()
+            except Exception as error:self.notice.setText(str(error));self.notice.show();return
+        self.credentials=None;super().reject()
+
+    def save_edit_draft(self):
+        from review import save
+        current=self.service.load()
+        if not current or current['snapshot']!=self.session['snapshot']:
+            raise ReviewChanged('文档已更新，请重新打开后继续。')
+        self.session.setdefault('edit_drafts',{})[self.current_block()['id']]=self.editor.value()
+        save(self.service.path,self.session)
 
     def closeEvent(self,event):
-        if self.operation:event.ignore()
-        else:self.credentials=None;super().closeEvent(event)
+        if self.operation:event.ignore();return
+        if self.editing:
+            try:self.save_edit_draft()
+            except Exception as error:self.notice.setText(str(error));self.notice.show();event.ignore();return
+        self.credentials=None;super().closeEvent(event)
 
 
 def standalone():
@@ -438,7 +524,7 @@ def smoke_test():
         session=dict(file=str(file),blocks=merge_document('# 规则\n\n最多 3 人\n','# 规则\n\n最多 5 人\n','# 规则\n\n最多 8 人\n'),decisions={},has_baseline=True)
         dialog=ReviewDialog('',('', ''),session=session)
         dialog.show();app.processEvents()
-        assert dialog.outstanding() and dialog.confirm.text()=='查看下一处待确认'
+        assert dialog.outstanding() and dialog.confirm.text()=='下一处' and not dialog.confirm.isEnabled()
         dialog.close();app.processEvents()
     print('PASS: frozen document review window, rendering, navigation and conflict controls')
     return 0
