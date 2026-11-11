@@ -48,6 +48,35 @@ class EntityTests(unittest.TestCase):
         body = '<p>原组<strong>。</strong>后续</p><p><strong><ac:structured-macro ac:name="view-file"><ac:parameter ac:name="height">250</ac:parameter></ac:structured-macro><br /></strong></p>'
         self.assertEqual(s.semantic(body), s.semantic(s.md_to_storage(s.storage_to_md(body))))
 
+    def test_styled_attachment_with_break_and_storage_newline(self):
+        macro = '<ac:structured-macro ac:name="view-file"><ac:parameter ac:name="name"><ri:attachment ri:filename="preview.html" /></ac:parameter><ac:parameter ac:name="height">250</ac:parameter></ac:structured-macro>'
+        for tag in ('strong', 'b', 'em', 'i', 's', 'del'):
+            for newline in ('\n', '\r\n', '\n\n'):
+                for quote in (False, True):
+                    with self.subTest(tag=tag, newline=repr(newline), quote=quote):
+                        body = '<p><'+tag+'>'+macro+'<br />'+newline+'</'+tag+'></p>'
+                        if quote:
+                            body = '<blockquote>'+body+'</blockquote>'
+                        result = s.md_to_storage(s.storage_to_md(body))
+                        root = self.strict(result)
+                        self.assertEqual(s.semantic(body), s.semantic(result))
+                        self.assertEqual(len(root.findall('.//{'+s.AC+'}structured-macro')), 1)
+                        self.assertEqual(len(root.findall('.//br')), 1)
+                        self.assertEqual(root.find('.//{'+s.RI+'}attachment').get('{'+s.RI+'}filename'), 'preview.html')
+
+    def test_styled_multiline_text_does_not_split_inline_wrapper(self):
+        for tag in ('strong', 'em', 'del'):
+            for content in ('first\n\nsecond', 'first<br />\n\nsecond', ' first\r\nlast '):
+                with self.subTest(tag=tag, content=content):
+                    body = '<p><'+tag+'>'+content+'</'+tag+'></p><p>after</p>'
+                    result = s.md_to_storage(s.storage_to_md(body))
+                    root = self.strict(result)
+                    self.assertEqual(s.semantic(body), s.semantic(result))
+                    styled = root.find('.//'+tag)
+                    self.assertIsNotNone(styled)
+                    self.assertIn('first', ''.join(styled.itertext()))
+                    self.assertEqual(root.findall('.//p')[-1].text, 'after')
+
     def test_lists_in_table_preserve_structure(self):
         body = '<table><tr><td><p>通知：</p><ul><li>第一项</li><li><em>第二项</em></li></ul></td></tr></table>'
         result = s.md_to_storage(s.storage_to_md(body))

@@ -135,8 +135,12 @@ def storage_to_md(storage, images=None):
             # CommonMark delimiter rules depend on adjacent punctuation/whitespace.
             # Explicit inline tags keep these styles from becoming literal markers.
             if (not text[0].isalnum() or not text[-1].isalnum()
-                    or '<!-- confluence-storage:' in text):
-                return '<' + tag + '>' + text + '</' + tag + '>'
+                    or '<!-- confluence-storage:' in text or '\n' in text or '\r' in text):
+                # A <br> plus storage whitespace can create a blank Markdown line.
+                # Keep inline wrappers in one paragraph; references restore the
+                # original whitespace after Markdown has determined its blocks.
+                inline = text.replace('\r', '&#13;').replace('\n', '&#10;')
+                return '<' + tag + '>' + inline + '</' + tag + '>'
             return marker + text + marker
         if name == 'code':
             text = ''.join(n.itertext())

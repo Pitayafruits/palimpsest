@@ -80,6 +80,18 @@ class ImageSyncTests(unittest.TestCase):
         md=self.file.read_text(encoding='utf-8')
         root=s.xml_root(s.md_to_storage(md,raw_images=True))
         return [self.sync.images.file_for(n.get('src')) for n in root.iter('img')]
+    def test_pull_styled_image_with_storage_newline(self):
+        body = '<blockquote><p><strong>'+IMAGE+'<br />\r\n</strong></p></blockquote>'
+        self.client.body['body']['storage']['value'] = body
+        sync = self.create()
+        sync.tick()
+        markdown = self.file.read_text(encoding='utf-8')
+        self.assertIn('![', markdown)
+        self.assertEqual(self.srcs()[0].read_bytes(), RED)
+        self.assertEqual(s.semantic(body), s.semantic(s.md_to_storage(markdown, sync.images, upload=False)))
+        self.assertEqual(self.client.writes, 0)
+        self.assertEqual(self.client.uploads, 0)
+        self.assertTrue(list((sync.data / 'local-backups').glob('*.md')))
     def test_download_visible_markdown_and_preserve_layout(self):
         sync=self.create();sync.tick()
         self.assertIn('![示意图](',self.file.read_text(encoding='utf-8'))
