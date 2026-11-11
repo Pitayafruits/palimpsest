@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+<title id="title">Palimpsest · 重写本</title><desc id="desc">Two overlapping manuscripts, one blue and one ivory, on a soft white rounded tile.</desc>
+<defs>
+ <linearGradient id="tile" x2="0" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#edf0f6"/></linearGradient>
+ <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse"><stop stop-color="#47a3f2"/><stop offset="1" stop-color="#2b5bc6"/></linearGradient>
+ <linearGradient id="paper" x2="0" y2="1"><stop stop-color="#fffef9"/><stop offset="1" stop-color="#f6f6f0"/></linearGradient>
+ <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dy="12" stdDeviation="15" flood-color="#1e2d4b" flood-opacity=".12"/></filter>
+ <filter id="sheetShadow" x="-30%" y="-30%" width="170%" height="180%"><feDropShadow dy="16" stdDeviation="18" flood-color="#1e2d4b" flood-opacity=".20"/></filter>
+</defs>
+<rect x="64" y="64" width="896" height="896" rx="202" fill="url(#tile)" stroke="#ffffff" stroke-width="2" filter="url(#tileShadow)"/>
+<g transform="rotate(-12 512 512)" filter="url(#sheetShadow)">
+ <rect x="266" y="308" width="320" height="436" rx="38" fill="url(#blue)"/>
+ <g fill="#def1ff" opacity=".76"><rect x="309" y="370" width="200" height="12" rx="5"/><rect x="309" y="407" width="167" height="12" rx="5"/><rect x="309" y="444" width="184" height="12" rx="5"/></g>
+</g>
+<g transform="rotate(8 512 512)" filter="url(#sheetShadow)">
+ <path d="M460 256H654L752 354V672Q752 710 714 710H460Q422 710 422 672V294Q422 256 460 256Z" fill="url(#paper)"/>
+ <path d="M654 257L750 354H671L654 337Z" fill="#d6e5f7"/>
+ <path d="M654 267V337L671 354H742" stroke="#c0d3eb" opacity=".65" stroke-width="2" fill="none"/>
+ <rect x="471" y="411" width="194" height="15" rx="5" fill="#3b67a0"/>
+ <g fill="#97aac1"><rect x="471" y="458" width="167" height="12" rx="5"/><rect x="471" y="500" width="194" height="12" rx="5"/><rect x="471" y="542" width="133" height="12" rx="5"/></g>
+ <rect x="471" y="613" width="99" height="7" rx="3.5" fill="#c6ced6"/>
+</g>
+</svg>

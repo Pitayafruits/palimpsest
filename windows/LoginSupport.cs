@@ -13,7 +13,7 @@ public class LoginCredentials {
 
 public class CredentialStore {
     readonly string path;
-    static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Palimpsest|v1|" + ServerSettings.Site);
+    static byte[] Entropy { get { return Encoding.UTF8.GetBytes("Palimpsest|v1|" + ServerSettings.Site); } }
     public CredentialStore(string location = null) {
         path = location ?? Path.Combine(ServerSettings.DataRoot, "login.dat");
     }

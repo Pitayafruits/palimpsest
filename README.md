@@ -37,6 +37,7 @@
 | 转换保护 | 不完整的格式转换会停止覆盖；复杂宏通过存储标记保留 |
 | 登录记忆 | Windows 使用当前用户 DPAPI；macOS 使用系统钥匙串；支持退出账号 |
 | 原生体验 | Windows WinForms，macOS Qt；页面链接一键打开默认浏览器 |
+| 专属图标 | 蓝色旧稿与暖白新稿交叠，呼应“重写本”；Windows 与 macOS 使用统一图标 |
 | 自有站点 | 首次启动填写 HTTPS 站点，支持 `/wiki` 等路径和非默认端口 |
 
 ## 下载
@@ -53,7 +54,7 @@ Mac 同时提供 ZIP。每个平台附有 `SHA256SUMS` 校验文件。发行包�
 
 ## 快速开始
 
-1. 打开应用，填写 Confluence 站点地址，例如 `https://wiki.example.com` 或 `https://wiki.example.com/wiki`。
+1. Windows 打开应用后直接进入首页，粘贴完整文档链接即可自动识别并保存站点；macOS 首次打开时填写 Confluence 站点地址，例如 `https://wiki.example.com` 或 `https://wiki.example.com/wiki`。
 2. 使用有页面编辑权限的账号登录。
 3. 粘贴页面完整链接，选择本地 `.md` 文件。
 4. 选择首次同步以本地或网页为准，确认内容后启动同步。

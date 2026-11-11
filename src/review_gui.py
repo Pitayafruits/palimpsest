@@ -510,6 +510,8 @@ def standalone():
     credentials=json.loads(sys.stdin.readline())
     config=Path(sys.argv[sys.argv.index('--config')+1]).resolve()
     app=QApplication.instance() or QApplication(sys.argv);app.setApplicationName('Palimpsest')
+    from branding import apply_icon
+    apply_icon(app)
     dialog=ReviewDialog(config,(credentials['username'],credentials['password']));credentials.clear()
     dialog.exec()
     return 0
@@ -517,6 +519,8 @@ def standalone():
 
 def smoke_test():
     app=QApplication.instance() or QApplication([])
+    from branding import apply_icon
+    apply_icon(app)
     import tempfile
     from review import merge_document
     with tempfile.TemporaryDirectory() as temporary:

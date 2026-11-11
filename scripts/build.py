@@ -23,13 +23,16 @@ def freeze(entry, name, *extra):
 
 def main():
     if sys.platform == 'win32':
-        freeze('src/sync_engine.py', 'SyncCore', '--hidden-import', 'review_gui')
+        freeze('src/sync_engine.py', 'SyncCore', '--hidden-import', 'review_gui',
+               '--icon', 'assets/icons/palimpsest-v1.ico',
+               '--add-data', 'assets/icons/palimpsest-v1.png:assets/icons')
         package = DIST / 'Palimpsest'
         package.mkdir(exist_ok=True)
         shutil.copytree(DIST / 'SyncCore', package / 'engine', dirs_exist_ok=True)
         compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
         run(compiler, '/nologo', '/target:winexe', '/platform:x64',
             '/out:' + str(package / 'Palimpsest.exe'),
+            '/win32icon:' + str(ROOT / 'assets/icons/palimpsest-v1.ico'),
             '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll',
             '/r:System.Web.Extensions.dll', '/r:System.Security.dll',
             ROOT / 'windows/SyncWindow.cs', ROOT / 'windows/LoginSupport.cs', ROOT / 'windows/ServerSettings.cs')
@@ -39,6 +42,8 @@ def main():
         label = 'windows-x64'
     elif sys.platform == 'darwin':
         freeze('src/launch.py', 'Palimpsest', '--windowed',
+               '--icon', 'assets/icons/palimpsest-v1.icns',
+               '--add-data', 'assets/icons/palimpsest-v1.png:assets/icons',
                '--osx-bundle-identifier', 'io.palimpsest.sync',
                '--hidden-import', 'app', '--hidden-import', 'associations',
                '--hidden-import', 'login', '--hidden-import', 'sync_engine')

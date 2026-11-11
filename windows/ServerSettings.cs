@@ -5,9 +5,11 @@ using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 public static class ServerSettings {
     public static string Site { get; private set; }
+    public static string LoadError { get; private set; }
     public static string DataRoot { get {
         return Environment.GetEnvironmentVariable("PALIMPSEST_DATA") ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Palimpsest");
@@ -26,26 +28,31 @@ public static class ServerSettings {
             string value = Environment.GetEnvironmentVariable("PALIMPSEST_SITE");
             if(String.IsNullOrWhiteSpace(value) && File.Exists(path))
                 value = json.Deserialize<Dictionary<string,string>>(File.ReadAllText(path,Encoding.UTF8))["base_url"];
-            if(String.IsNullOrWhiteSpace(value)) {
-                using(var form = new Form()) {
-                    form.Text="Palimpsest · 连接站点"; form.ClientSize=new Size(540,176);
-                    form.StartPosition=FormStartPosition.CenterScreen; form.Font=new Font("Microsoft YaHei UI",10);
-                    var caption=new Label {Text="Confluence Server / Data Center 的 HTTPS 地址：",Left=20,Top=20,Width=500};
-                    var input=new TextBox {Left=20,Top=56,Width=500,Text="https://"};
-                    var save=new Button {Text="连接",Left=410,Top=110,Width=110};
-                    save.Click += delegate {
-                        try { Site=Normalize(input.Text); form.DialogResult=DialogResult.OK; }
-                        catch(Exception error) { MessageBox.Show(form,error.Message,"站点地址无效"); }
-                    };
-                    form.Controls.AddRange(new Control[]{caption,input,save}); form.AcceptButton=save;
-                    if(form.ShowDialog()!=DialogResult.OK) return false;
-                    value=Site;
-                }
-                Directory.CreateDirectory(DataRoot);
-                File.WriteAllText(path,json.Serialize(new {base_url=Normalize(value)}),new UTF8Encoding(false));
-            }
-            Site=Normalize(value); Environment.SetEnvironmentVariable("PALIMPSEST_SITE",Site);
+            Site=String.IsNullOrWhiteSpace(value) ? null : Normalize(value);
+            LoadError=null;
+            Environment.SetEnvironmentVariable("PALIMPSEST_SITE",Site);
             return true;
-        } catch(Exception error) { MessageBox.Show(error.Message,"无法读取站点配置"); return false; }
+        } catch(Exception) {
+            Site=null; LoadError="无法读取站点配置，请在首页粘贴完整的 Confluence 文档链接。";
+            Environment.SetEnvironmentVariable("PALIMPSEST_SITE",null);
+            return true;
+        }
+    }
+    public static void EnsureFromPageLink(string value) {
+        if(!String.IsNullOrWhiteSpace(Site)) return;
+        Uri url;
+        const string suffix="/pages/viewpage.action";
+        if(!Uri.TryCreate(value.Trim(),UriKind.Absolute,out url) || url.Scheme!="https" ||
+           url.UserInfo.Length!=0 || value.Contains("\\") || !url.AbsolutePath.EndsWith(suffix,StringComparison.Ordinal) ||
+           Regex.Matches(url.Query,@"(?:\?|&)pageId=").Count!=1 ||
+           !Regex.IsMatch(url.Query,@"(?:\?|&)pageId=[1-9][0-9]*(?:&|$)"))
+            throw new ArgumentException("请先粘贴完整的 Confluence 文档链接，程序会自动识别站点。");
+        string detected=Normalize(url.GetLeftPart(UriPartial.Authority)+url.AbsolutePath.Substring(0,url.AbsolutePath.Length-suffix.Length));
+        Directory.CreateDirectory(DataRoot);
+        string path=Path.Combine(DataRoot,"site.json"),temporary=path+".tmp";
+        File.WriteAllText(temporary,new JavaScriptSerializer().Serialize(new {base_url=detected}),new UTF8Encoding(false));
+        if(File.Exists(path)) File.Replace(temporary,path,null); else File.Move(temporary,path);
+        Site=detected; LoadError=null;
+        Environment.SetEnvironmentVariable("PALIMPSEST_SITE",Site);
     }
 }

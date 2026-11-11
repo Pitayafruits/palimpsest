@@ -58,6 +58,7 @@ public class SyncWindow : Form {
     public SyncWindow(string credentialPath) {
         credentialStore = new CredentialStore(credentialPath);
         Text = "Palimpsest · Markdown ↔ Confluence";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         AutoScaleMode = AutoScaleMode.None;
         ClientSize = new Size(900, 412);
         MinimumSize = Size; MaximumSize = Size;
@@ -113,6 +114,7 @@ public class SyncWindow : Form {
         Directory.CreateDirectory(root);
         LoadCatalogue();
         RestoreLogin();
+        if(ServerSettings.LoadError != null) status.Text=ServerSettings.LoadError;
         stop.Enabled = false;
     }
 
@@ -161,6 +163,7 @@ public class SyncWindow : Form {
     string CataloguePath { get { return Path.Combine(root, "associations.json"); } }
     string BindingDir(string id) { return Path.Combine(root, "bindings", id); }
     static string PageUrl(string value) {
+        if(String.IsNullOrWhiteSpace(ServerSettings.Site)) return "";
         return "" + ServerSettings.Site + "/pages/viewpage.action?pageId=" + ParsePage(value);
     }
     void OpenDocument(object sender, LinkLabelLinkClickedEventArgs e) {
@@ -170,6 +173,7 @@ public class SyncWindow : Form {
     }
     static string ParsePage(string value) {
         value = value.Trim();
+        ServerSettings.EnsureFromPageLink(value);
         if (Regex.IsMatch(value, @"^[1-9][0-9]*$")) return value;
         Uri url;
         if (!Uri.TryCreate(value, UriKind.Absolute, out url) || url.Scheme != "https" || url.GetLeftPart(UriPartial.Authority) != new Uri(ServerSettings.Site).GetLeftPart(UriPartial.Authority) || url.AbsolutePath != new Uri(ServerSettings.Site).AbsolutePath.TrimEnd('/') + "/pages/viewpage.action" || url.UserInfo.Length != 0)
@@ -211,8 +215,10 @@ public class SyncWindow : Form {
     void PageChanged(object sender, EventArgs e) {
         if(updatingFields || !catalogueReady) return;
         string pageId;
+        bool needsSite=String.IsNullOrWhiteSpace(ServerSettings.Site);
         try { pageId = ParsePage(page.Text); }
         catch { UpdateBaseline(); return; }
+        if(needsSite) RestoreLogin();
         if(pageId != contextPageId) {
             updatingFields = true;
             try {
@@ -362,6 +368,7 @@ public class SyncWindow : Form {
         start.Enabled = catalogueReady && !authenticating && (worker == null || worker.HasExited);
     }
     void RestoreLogin() {
+        if(String.IsNullOrWhiteSpace(ServerSettings.Site)) { ApplyLoginUI(); return; }
         try {
             session = credentialStore.Load();
             if(session != null) user.Text = session.username;
@@ -373,6 +380,9 @@ public class SyncWindow : Form {
     }
     void Authenticate(Action afterLogin) {
         if(authenticating || session != null) return;
+        if(String.IsNullOrWhiteSpace(ServerSettings.Site)) {
+            status.Text="请先粘贴完整的 Confluence 文档链接。"; page.Focus(); return;
+        }
         string username = user.Text.Trim(), secret = password.Text;
         if(username.Length == 0 || secret.Length == 0) { status.Text = "请输入账号和密码。"; return; }
         authenticating = true; ApplyLoginUI(); status.Text = "正在登录…";

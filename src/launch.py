@@ -7,6 +7,8 @@ from server import configured_site, configure_site
 def main():
     application = QApplication.instance() or QApplication(sys.argv)
     application.setApplicationName('Palimpsest')
+    from branding import apply_icon
+    apply_icon(application)
     if '--review-smoke-test' in sys.argv:
         from review_gui import smoke_test
         return smoke_test()

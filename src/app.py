@@ -465,6 +465,8 @@ class Window(QWidget):
 def main():
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName('Palimpsest')
+    from branding import apply_icon
+    apply_icon(app)
     app.setOrganizationName('Palimpsest')
     engine.ROOT.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(engine.ROOT / 'app.lock'))
