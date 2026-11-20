@@ -8,6 +8,7 @@ The MIT license covers this project's own code. It does not replace the licenses
 | lxml 5.3.0 | BSD-3-Clause; bundled libxml2/libxslt have their own notices | https://github.com/lxml/lxml/tree/lxml-5.3.0 |
 | markdown-it-py 3.0.0 | MIT | https://github.com/executablebooks/markdown-it-py/tree/v3.0.0 |
 | mdurl | MIT | https://github.com/executablebooks/mdurl |
+| truststore 0.10.4 | MIT | https://github.com/sethmlarson/truststore |
 | PySide6 / Shiboken6 6.8.3 | LGPLv3 / GPLv3 / commercial | https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.8.3-src/ |
 | Qt 6.8.3 libraries used by PySide6 | LGPLv3 / GPLv3 / commercial; component-specific licenses | https://download.qt.io/archive/qt/6.8/6.8.3/single/ |
 | PyInstaller 6.11.1 | GPLv2-or-later with bootloader exception | https://github.com/pyinstaller/pyinstaller/tree/v6.11.1 |

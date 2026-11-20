@@ -6,16 +6,16 @@ import sys
 import urllib.error
 import urllib.request
 
-from associations import SITE
-from sync_engine import NoRedirect
+from server import require_site
+from confluence_http import create_opener
 
 
 def verify(username, password):
     auth = base64.b64encode((username + ':' + password).encode()).decode()
-    request = urllib.request.Request(SITE + '/rest/api/user/current', headers={
+    request = urllib.request.Request(require_site() + '/rest/api/user/current', headers={
         'Authorization': 'Basic ' + auth, 'Accept': 'application/json'})
     try:
-        with urllib.request.build_opener(NoRedirect).open(request, timeout=25) as response:
+        with create_opener().open(request, timeout=25) as response:
             identity = json.load(response)
     except urllib.error.HTTPError as error:
         reason = error.headers.get('X-Seraph-LoginReason', '')
@@ -33,12 +33,12 @@ def verify(username, password):
 
 class KeychainStore:
     SERVICE = b'io.palimpsest.sync'
-    ACCOUNT = SITE.encode('utf-8')
     NOT_FOUND = -25300
 
     def __init__(self):
         if sys.platform != 'darwin':
             raise RuntimeError('登录记忆需要 macOS 钥匙串。')
+        self.ACCOUNT = require_site().encode('utf-8')
         self.sec = C.CDLL('/System/Library/Frameworks/Security.framework/Security')
         self.cf = C.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
         self.cf.CFRelease.argtypes = [C.c_void_p]

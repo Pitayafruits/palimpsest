@@ -17,13 +17,13 @@ class LoginHttpTests(unittest.TestCase):
         for payload in ({'type': 'anonymous'}, {'type': 'known', 'username': 'other'}):
             opener = Mock()
             opener.open.return_value = self.response(payload)
-            with patch('login.urllib.request.build_opener', return_value=opener):
+            with patch('login.create_opener', return_value=opener):
                 with self.assertRaises(ValueError): verify('alice_dev', 'secret')
 
     def test_network_failure_does_not_look_like_success(self):
         opener = Mock()
         opener.open.side_effect = urllib.error.URLError('offline')
-        with patch('login.urllib.request.build_opener', return_value=opener):
+        with patch('login.create_opener', return_value=opener):
             with self.assertRaises(urllib.error.URLError): verify('user', 'secret')
 
     def test_401_and_403_are_distinct_for_sync(self):
@@ -33,10 +33,6 @@ class LoginHttpTests(unittest.TestCase):
             expected = engine.AuthenticationExpired if code == 401 else RuntimeError
             with self.assertRaises(expected) as context: client.get()
             if code == 403: self.assertNotIsInstance(context.exception, engine.AuthenticationExpired)
-
-    def test_redirect_refused(self):
-        with self.assertRaises(RuntimeError):
-            engine.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.test')
 
 class NativeFunction:
     def __init__(self, implementation): self.implementation = implementation

@@ -3,7 +3,18 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from associations import Catalogue, parse_page
+from associations import Catalogue, document_link, parse_page
+
+
+class DocumentLinkTests(unittest.TestCase):
+    def test_first_link_recognizes_site_and_page(self):
+        self.assertEqual(document_link('https://Wiki.example.com:8443/wiki/pages/viewpage.action?pageId=123'),
+                         ('https://wiki.example.com:8443/wiki', '123'))
+        for link in ('123', 'http://wiki.example.com/pages/viewpage.action?pageId=123',
+                     'https://user@wiki.example.com/pages/viewpage.action?pageId=123',
+                     'https://wiki.example.com/pages/viewpage.action?pageId=123&pageId='):
+            with self.subTest(link=link), self.assertRaises(ValueError):
+                document_link(link)
 
 
 class AssociationTests(unittest.TestCase):

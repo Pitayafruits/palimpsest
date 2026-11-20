@@ -15,3 +15,4 @@ jobs:
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
+          PALIMPSEST_SITE: https://wiki.example.com

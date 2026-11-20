@@ -1,3 +1,4 @@
 lxml==5.3.0
 markdown-it-py==3.0.0
 PySide6-Essentials==6.8.3
+truststore==0.10.4

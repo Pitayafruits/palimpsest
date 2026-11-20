@@ -7,13 +7,14 @@ import os
 from pathlib import Path
 import re
 import sys
-from server import SITE, DATA_ROOT, normalize_site
+from server import DATA_ROOT, normalize_site, require_site
 import time
 import urllib.request
 import urllib.error
 from lxml import etree
 from image_sync import Images, AttachmentClient
 from markdown_it import MarkdownIt
+from confluence_http import create_opener
 from review import ConflictPending, ReviewService
 
 ROOT = DATA_ROOT
@@ -184,11 +185,6 @@ def md_to_storage(md, images=None, upload=True, raw_images=False):
     return images.replace_images(root, upload=upload) if images is not None else rendered
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise RuntimeError('接口发生重定向，请检查登录方式。')
-
-
 class AuthenticationExpired(RuntimeError):
     pass
 
@@ -198,10 +194,10 @@ class Client(AttachmentClient):
     def __init__(self, config, username, password):
         self.base = config['base_url'].rstrip('/')
         self.page = str(config['page_id'])
-        if normalize_site(self.base) != SITE or not re.fullmatch(r'[1-9][0-9]*', self.page):
+        if normalize_site(self.base) != require_site() or not re.fullmatch(r'[1-9][0-9]*', self.page):
             raise ValueError('请输入当前站点的有效数字 pageId。')
         self.auth = 'Basic ' + base64.b64encode((username + ':' + password).encode()).decode()
-        self.opener = urllib.request.build_opener(NoRedirect)
+        self.opener = create_opener()
 
     def request(self, method='GET', payload=None):
         url = self.base + '/rest/api/content/' + self.page

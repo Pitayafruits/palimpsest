@@ -40,13 +40,23 @@ def configured_site():
 
 def configure_site(value):
     global SITE
-    SITE = normalize_site(value)
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    site = normalize_site(value)
+    SETTINGS.parent.mkdir(parents=True, exist_ok=True)
     temporary = SETTINGS.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'base_url': SITE}), encoding='utf-8')
+    temporary.write_text(json.dumps({'base_url': site}), encoding='utf-8')
     os.replace(temporary, SETTINGS)
-    os.environ['PALIMPSEST_SITE'] = SITE
+    SITE = site
     return SITE
 
 
-SITE = configured_site() or 'https://wiki.example.com'
+def require_site():
+    if not SITE:
+        raise ValueError('请先粘贴完整的 Confluence 文档链接。')
+    return SITE
+
+
+try:
+    SITE = configured_site()
+except (OSError, ValueError, KeyError, AttributeError, TypeError):
+    # Keep the home screen available if the saved settings cannot be read.
+    SITE = None

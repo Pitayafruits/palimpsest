@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtTest import QTest
 from associations import Catalogue
 from app import Window, Worker, page_url
+import server
 import sync_engine as engine
 
 APP = QApplication.instance() or QApplication([])
@@ -56,6 +57,29 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(reopened.file.text(), str(self.doc.resolve()))
         self.assertEqual(reopened.password.text(), '')
         reopened.close()
+
+    def test_first_document_link_configures_site_and_restores_login(self):
+        settings = self.root / 'site.json'
+        store = MemoryStore(('alice_dev', 'test-secret'))
+        with patch.object(server, 'SITE', None), patch.object(server, 'SETTINGS', settings):
+            window = Window(Catalogue(self.root / 'data'), store)
+            try:
+                window.login()
+                self.assertIn('粘贴完整', window.status.text())
+                window.page.setText('123')
+                self.assertFalse(settings.exists())
+                self.assertIsNone(window.credentials)
+                window.page.setText('https://wiki.example.com:8443/wiki/pages/viewpage.action?pageId=123')
+                self.assertEqual(json.loads(settings.read_text(encoding='utf-8'))['base_url'],
+                                 'https://wiki.example.com:8443/wiki')
+                self.assertEqual(window.credentials, store.value)
+                window.file.setText(str(self.doc))
+                binding = window.save_binding()
+                window.page.setText('https://other.example.com/wiki/pages/viewpage.action?pageId=123')
+                self.assertIsNone(window.current_binding())
+                self.assertEqual(window.catalogue.bindings, [binding])
+            finally:
+                window.close()
 
     def test_known_link_restores_new_link_clears_and_draft_preserves(self):
         self.bind()

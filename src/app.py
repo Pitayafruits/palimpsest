@@ -8,13 +8,14 @@ from PySide6.QtCore import QThread, Signal, QLockFile, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QLineEdit, QFileDialog, QMessageBox)
-from associations import Catalogue, SITE, parse_page
+from associations import Catalogue, PAGE_PATH, document_link, parse_page
 from login import KeychainStore, verify
+import server
 import sync_engine as engine
 
 
 def page_url(page):
-    return SITE + '/pages/viewpage.action?pageId=' + page
+    return server.require_site() + PAGE_PATH + '?pageId=' + page
 
 
 class Worker(QThread):
@@ -117,7 +118,7 @@ class Window(QWidget):
         form.setContentsMargins(26, 24, 26, 24)
         form.setSpacing(10)
         self.page = QLineEdit()
-        self.page.setPlaceholderText(SITE + '/pages/viewpage.action?pageId=…')
+        self.page.setPlaceholderText('粘贴完整的 Confluence 文档链接')
         self.open_doc = QPushButton('打开文档')
         self.open_doc.setObjectName('link')
         row = QHBoxLayout()
@@ -195,7 +196,7 @@ class Window(QWidget):
         self.password.returnPressed.connect(self.login)
         self.logout_button.clicked.connect(self.logout)
         binding = next((b for b in catalogue.bindings if b['id'] == catalogue.data.get('last_id')), None)
-        if binding:
+        if binding and server.SITE:
             self.load_binding(binding)
         self.restore_login()
         self.update_controls()
@@ -204,6 +205,8 @@ class Window(QWidget):
         self.status.setText(text)
 
     def restore_login(self):
+        if not server.SITE:
+            return
         try:
             if self.store is None:
                 self.store = KeychainStore()
@@ -223,6 +226,24 @@ class Window(QWidget):
     def page_changed(self):
         if self.changing:
             return
+        if not server.SITE:
+            try:
+                site, _ = document_link(self.page.text())
+            except ValueError:
+                return
+            try:
+                # Existing bindings may still identify the site if site.json is missing.
+                for binding in self.catalogue.bindings:
+                    mapping = self.catalogue.directory(binding) / 'mapping.json'
+                    saved = json.loads(mapping.read_text(encoding='utf-8'))['base_url']
+                    if server.normalize_site(saved) != site:
+                        raise ValueError('此链接和已有文档关联的站点不一致。')
+                server.configure_site(site)
+            except (ValueError, OSError, KeyError, AttributeError, TypeError) as error:
+                self.tell('无法配置站点：' + str(error))
+                return
+            self.tell('')
+            self.restore_login()
         try:
             page = parse_page(self.page.text())
         except ValueError:
@@ -301,6 +322,10 @@ class Window(QWidget):
 
     def login(self, checked=False, continue_sync=False):
         if self.login_worker or self.worker or self.credentials:
+            return
+        if not server.SITE:
+            self.tell('请先粘贴完整的 Confluence 文档链接。')
+            self.page.setFocus()
             return
         username, password = self.user.text().strip(), self.password.text()
         if not username or not password:

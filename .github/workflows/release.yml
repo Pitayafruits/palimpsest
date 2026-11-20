@@ -23,6 +23,7 @@ jobs:
         env:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
+          PALIMPSEST_SITE: https://wiki.example.com
       - name: Engine smoke test
         run: python src/sync_engine.py --self-test
       - name: Build native package

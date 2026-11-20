@@ -5,25 +5,34 @@ import os
 from pathlib import Path
 import re
 import time
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlsplit, urlunsplit, parse_qs
 
-from server import SITE, normalize_site
+from server import normalize_site, require_site
 
+PAGE_PATH = '/pages/viewpage.action'
+
+
+def document_link(value):
+    value = value.strip()
+    url = urlsplit(value)
+    if (url.scheme != 'https' or url.username is not None or url.password is not None
+            or '\\' in value or not url.path.endswith(PAGE_PATH)):
+        raise ValueError('请粘贴完整的 HTTPS Confluence 文档链接。')
+    site = normalize_site(urlunsplit((url.scheme, url.netloc, url.path[:-len(PAGE_PATH)], '', '')))
+    values = parse_qs(url.query, keep_blank_values=True).get('pageId', [])
+    if len(values) != 1 or not re.fullmatch(r'[1-9][0-9]*', values[0]):
+        raise ValueError('链接中未找到唯一的有效 pageId。')
+    return site, values[0]
 
 def parse_page(value):
+    expected = require_site()
     value = value.strip()
     if re.fullmatch(r'[1-9][0-9]*', value):
         return value
-    url = urlparse(value)
-    expected = urlparse(SITE)
-    if (url.scheme != expected.scheme or url.netloc != expected.netloc
-            or url.path != expected.path + '/pages/viewpage.action'
-            or url.username or url.password):
+    site, page = document_link(value)
+    if site != expected:
         raise ValueError('请输入当前站点的数字 pageId 或完整页面链接。')
-    values = parse_qs(url.query).get('pageId', [])
-    if len(values) != 1 or not re.fullmatch(r'[1-9][0-9]*', values[0]):
-        raise ValueError('链接中未找到唯一的有效 pageId。')
-    return values[0]
+    return page
 
 
 def atomic_json(path, data):
@@ -81,7 +90,7 @@ class Catalogue:
             history = state.parent / 'state-history'
             history.mkdir(parents=True, exist_ok=True)
             os.replace(state, history / (str(time.time_ns()) + '.json'))
-        config = dict(base_url=SITE, page_id=page, local_file=file, initial_sync=direction,
+        config = dict(base_url=require_site(), page_id=page, local_file=file, initial_sync=direction,
                       poll_seconds=30, settle_seconds=5, initial_remote_backup=True)
         atomic_json(self.directory(binding) / 'mapping.json', config)
         self.data['bindings'] = retained + [binding]
